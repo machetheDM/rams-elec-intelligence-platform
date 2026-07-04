@@ -1,0 +1,81 @@
+{
+  "name": "Rams @Elec — Load-Shedding Client Alert",
+  "description": "Triggered when new load-shedding events are detected. Sends personalised WhatsApp alerts to affected customers, prioritising cold room owners.",
+  "nodes": [
+    {
+      "name": "Webhook — New Load-Shedding Event",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "loadshedding-alert",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "name": "Query Affected Customers",
+      "type": "n8n-nodes-base.postgres",
+      "position": [500, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, phone, whatsapp, area_zone FROM customers WHERE area_zone = '{{ $json.area_zone }}' AND alert_subscribed = true"
+      }
+    },
+    {
+      "name": "Query Cold Room Customers",
+      "type": "n8n-nodes-base.postgres",
+      "position": [500, 500],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT DISTINCT c.id, c.name, c.phone, c.whatsapp, c.area_zone, c.address FROM customers c JOIN equipment e ON c.id = e.customer_id WHERE c.area_zone = '{{ $json.area_zone }}' AND e.type = 'cold_room' AND c.alert_subscribed = true"
+      }
+    },
+    {
+      "name": "Send Alert — Cold Room Priority",
+      "type": "n8n-nodes-base.twilio",
+      "position": [750, 500],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:{{ $json.whatsapp || $json.phone }}",
+        "message": "⚠️ LOAD SHEDDING ALERT — Rams @Elec\n\nStage {{ $('Webhook — New Load-Shedding Event').item.json.stage }} load shedding begins at {{ $('Webhook — New Load-Shedding Event').item.json.start_time }} in {{ $json.area_zone }}.\n\n🔴 COLD ROOM WARNING: Your cold room at {{ $json.address }} may be affected. Ensure backup power is ready. Perishable goods at risk!\n\nNeed backup support? Call: +27 71 101 8493\nReply STOP to unsubscribe."
+      }
+    },
+    {
+      "name": "Send Alert — General Customers",
+      "type": "n8n-nodes-base.twilio",
+      "position": [750, 300],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:{{ $json.whatsapp || $json.phone }}",
+        "message": "⚡ Load Shedding Alert — Rams @Elec\n\nStage {{ $('Webhook — New Load-Shedding Event').item.json.stage }}: {{ $('Webhook — New Load-Shedding Event').item.json.start_time }} – {{ $('Webhook — New Load-Shedding Event').item.json.end_time }} in {{ $json.area_zone }}.\n\nProtect your equipment — surge protection and backup power available.\nGet a free quote: https://ramsatelec.com/inquire\nReply STOP to unsubscribe."
+      }
+    },
+    {
+      "name": "Log Notifications",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1000, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO notification_log (customer_id, channel, message_type, content, status, sent_at) VALUES ('{{ $json.id }}', 'whatsapp', 'loadshedding_alert', 'Load shedding Stage {{ $('Webhook — New Load-Shedding Event').item.json.stage }} alert for {{ $json.area_zone }}', 'sent', NOW())"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — New Load-Shedding Event": {
+      "main": [
+        [
+          { "node": "Query Affected Customers", "type": "main", "index": 0 },
+          { "node": "Query Cold Room Customers", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Query Cold Room Customers": { "main": [[ { "node": "Send Alert — Cold Room Priority", "type": "main", "index": 0 } ]] },
+    "Query Affected Customers": { "main": [[ { "node": "Send Alert — General Customers", "type": "main", "index": 0 } ]] },
+    "Send Alert — Cold Room Priority": { "main": [[ { "node": "Log Notifications", "type": "main", "index": 0 } ]] },
+    "Send Alert — General Customers": { "main": [[ { "node": "Log Notifications", "type": "main", "index": 0 } ]] }
+  }
+}

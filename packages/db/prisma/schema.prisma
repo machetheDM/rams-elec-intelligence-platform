@@ -1,0 +1,342 @@
+// =============================================================================
+// Rams @Elec Intelligence Platform — Database Schema
+// =============================================================================
+// Star-schema design: Dimension tables describe entities,
+// Fact tables capture business events, Event/Log tables track state changes.
+//
+// This schema serves dual purpose:
+//   1. Operational — day-to-day business (inquiries, jobs, customers)
+//   2. Analytical  — feeds ML models (quote estimator, dispatch scoring)
+//                     and Streamlit dashboards via Gold-layer views
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// DIMENSION TABLES
+// =============================================================================
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  phone     String   @unique
+  whatsapp  String?
+  address   String?
+  areaZone  String   @map("area_zone") // e.g. "Sandton", "Polokwane", "Mokopane"
+  alertSubscribed Boolean @default(false) @map("alert_subscribed")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  jobs       Job[]
+  inquiries  Inquiry[]
+  quotes     Quote[]
+  equipment  Equipment[]
+  maintenanceSchedules  MaintenanceSchedule[]
+  notificationLogs      NotificationLog[]
+  chatbotConversations  ChatbotConversation[]
+
+  @@map("customers")
+}
+
+model Technician {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  whatsapp  String?
+  email     String?  @unique
+  skills    String[] // e.g. ["electrical", "refrigeration", "hvac", "cold_room"]
+  areaZones String[] @map("area_zones") // e.g. ["Sandton", "Midrand", "Centurion"]
+  active    Boolean  @default(true)
+  maxDailyJobs Int   @default(4) @map("max_daily_jobs")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  jobs Job[]
+
+  @@map("technicians")
+}
+
+model Equipment {
+  id             String   @id @default(cuid())
+  customerId     String   @map("customer_id")
+  type           String   // cold_room | hvac | electrical_panel | generator | other
+  brand          String?
+  model          String?
+  installDate    DateTime? @map("install_date")
+  lastServiceDate DateTime? @map("last_service_date")
+  warrantyExpiry  DateTime? @map("warranty_expiry")
+  notes          String?
+
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobs           Job[]
+  maintenanceSchedules MaintenanceSchedule[]
+
+  @@map("equipment")
+}
+
+model ServiceType {
+  id                   String @id @default(cuid())
+  name                 String @unique // e.g. "Cold Room Installation", "Emergency Electrical Repair"
+  category             String // electrical | refrigeration | emergency | maintenance | installation
+  baseCostMin          Float  @map("base_cost_min")
+  baseCostMax          Float  @map("base_cost_max")
+  typicalDurationHours Float  @map("typical_duration_hours")
+
+  jobs Job[]
+
+  @@map("service_types")
+}
+
+// =============================================================================
+// FACT TABLES
+// =============================================================================
+
+model Job {
+  id              String    @id @default(cuid())
+  customerId      String    @map("customer_id")
+  technicianId    String?   @map("technician_id")
+  serviceTypeId   String    @map("service_type_id")
+  equipmentId     String?   @map("equipment_id")
+  status          String    @default("open") // open | assigned | in_progress | complete | cancelled
+  urgency         String    @default("medium") // low | medium | high | emergency
+  areaZone        String    @map("area_zone")
+  scheduledDate   DateTime? @map("scheduled_date")
+  completedDate   DateTime? @map("completed_date")
+  quotedCost      Float?    @map("quoted_cost")
+  actualCost      Float?    @map("actual_cost")
+  jobNotes        String?   @map("job_notes")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  technician      Technician? @relation(fields: [technicianId], references: [id])
+  serviceType     ServiceType @relation(fields: [serviceTypeId], references: [id])
+  equipment       Equipment?  @relation(fields: [equipmentId], references: [id])
+
+  statusHistory   JobStatusHistory[]
+  inquiry         Inquiry?
+
+  @@index([status])
+  @@index([areaZone])
+  @@index([createdAt])
+  @@index([customerId])
+  @@index([technicianId])
+  @@map("jobs")
+}
+
+model Inquiry {
+  id               String   @id @default(cuid())
+  customerId       String?  @map("customer_id")
+  source           String   @default("web_form") // web_form | whatsapp | phone | email
+  rawMessage       String   @map("raw_message")
+  classifiedType   String?  @map("classified_type") // electrical | refrigeration | emergency | maintenance | installation | general
+  urgencyScore     Float?   @map("urgency_score") // 0.0–1.0 from ML classifier
+  estimatedCostMin Float?   @map("estimated_cost_min")
+  estimatedCostMax Float?   @map("estimated_cost_max")
+  assignedJobId    String?  @unique @map("assigned_job_id")
+  status           String   @default("new") // new | triaged | converted | closed
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  assignedJob      Job?      @relation(fields: [assignedJobId], references: [id])
+  quotes           Quote[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("inquiries")
+}
+
+model Quote {
+  id           String    @id @default(cuid())
+  inquiryId    String    @map("inquiry_id")
+  customerId   String    @map("customer_id")
+  items        Json      @default("[]") // [{description, quantity, unitCost, total}]
+  totalMin     Float     @map("total_min")
+  totalMax     Float     @map("total_max")
+  status       String    @default("draft") // draft | sent | accepted | rejected
+  sentAt       DateTime? @map("sent_at")
+  respondedAt  DateTime? @map("responded_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  inquiry      Inquiry   @relation(fields: [inquiryId], references: [id])
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("quotes")
+}
+
+model MaintenanceSchedule {
+  id             String    @id @default(cuid())
+  equipmentId    String    @map("equipment_id")
+  customerId     String    @map("customer_id")
+  scheduledDate  DateTime  @map("scheduled_date")
+  intervalMonths Int       @default(6) @map("interval_months")
+  status         String    @default("pending") // pending | completed | overdue
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  equipment      Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([scheduledDate])
+  @@map("maintenance_schedules")
+}
+
+// =============================================================================
+// EVENT / LOG TABLES
+// =============================================================================
+
+model LoadsheddingEvent {
+  id        String   @id @default(cuid())
+  areaZone  String   @map("area_zone")
+  stage     Int
+  startTime DateTime @map("start_time")
+  endTime   DateTime @map("end_time")
+  source    String   @default("eskomsepush") // eskomsepush
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([areaZone])
+  @@index([startTime])
+  @@index([endTime])
+  @@map("loadshedding_events")
+}
+
+model NotificationLog {
+  id          String   @id @default(cuid())
+  customerId  String?  @map("customer_id")
+  channel     String   // whatsapp | sms | email
+  messageType String   @map("message_type") // inquiry_confirmation | technician_alert | loadshedding_alert | job_update | maintenance_reminder
+  content     String
+  status      String   @default("sent") // sent | failed
+  sentAt      DateTime @default(now()) @map("sent_at")
+
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([sentAt])
+  @@map("notification_log")
+}
+
+model JobStatusHistory {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  oldStatus String   @map("old_status")
+  newStatus String   @map("new_status")
+  changedBy String   @map("changed_by") // technician_id or "system" or "admin"
+  changedAt DateTime @default(now()) @map("changed_at")
+  notes     String?
+
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_status_history")
+}
+
+// =============================================================================
+// ETL ERROR LOG (for Module 2 pipeline)
+// =============================================================================
+
+model EtlErrorLog {
+  id          String   @id @default(cuid())
+  sourceFile  String   @map("source_file")
+  rowIndex    Int?     @map("row_index")
+  fieldName   String?  @map("field_name")
+  rawValue    String?  @map("raw_value")
+  errorType   String   @map("error_type") // validation | parsing | duplicate | missing_required
+  errorMessage String  @map("error_message")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([sourceFile])
+  @@index([errorType])
+  @@map("etl_error_log")
+}
+
+// =============================================================================
+// CHATBOT CONVERSATION LOG (for Module 5 RAG chatbot)
+// =============================================================================
+
+model ChatbotConversation {
+  id           String   @id @default(cuid())
+  customerId   String   @map("customer_id")
+  role         String   // user | assistant
+  message      String
+  sources      Json?    // [{chunk_id, document, relevance_score}]
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([createdAt])
+  @@map("chatbot_conversations")
+}
+
+// =============================================================================
+// USER ACCOUNTS (for NextAuth.js — Module 5)
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  phone         String?   @unique
+  role          String    @default("customer") // customer | technician | admin
+  passwordHash  String?   @map("password_hash")
+  customerId    String?   @unique @map("customer_id")
+  technicianId  String?   @unique @map("technician_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refreshToken      String? @map("refresh_token")
+  accessToken       String? @map("access_token")
+  expiresAt         Int?    @map("expires_at")
+  tokenType         String? @map("token_type")
+  scope             String?
+  idToken           String? @map("id_token")
+  sessionState      String? @map("session_state")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}

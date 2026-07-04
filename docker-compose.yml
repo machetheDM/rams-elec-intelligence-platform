@@ -1,0 +1,264 @@
+services:
+  # =============================================================================
+  # PostgreSQL Database
+  # =============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: rams-elec-db
+    env_file: .env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rams_elec
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # Redis (for Airflow Celery executor)
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: rams-elec-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # FastAPI — Triage Engine
+  # =============================================================================
+  triage:
+    build:
+      context: ./services/triage
+      dockerfile: Dockerfile
+    container_name: rams-elec-triage
+    env_file: .env
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - TRIAGE_PORT=8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/triage/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # FastAPI — Load-Shedding Service
+  # =============================================================================
+  loadshedding:
+    build:
+      context: ./services/loadshedding
+      dockerfile: Dockerfile
+    container_name: rams-elec-loadshedding
+    env_file: .env
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - LOADSHEDDING_PORT=8002
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/loadshedding/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # FastAPI — RAG Chatbot
+  # =============================================================================
+  chatbot:
+    build:
+      context: ./services/chatbot
+      dockerfile: Dockerfile
+    container_name: rams-elec-chatbot
+    env_file: .env
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - FAISS_INDEX_PATH=/app/knowledge_base/faiss_index
+      - CHATBOT_PORT=8003
+    volumes:
+      - ./services/chatbot/knowledge_base:/app/knowledge_base
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/chatbot/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # FastAPI — Dispatch Service
+  # =============================================================================
+  dispatch:
+    build:
+      context: ./services/dispatch
+      dockerfile: Dockerfile
+    container_name: rams-elec-dispatch
+    env_file: .env
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - DISPATCH_PORT=8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/dispatch/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Next.js Frontend
+  # =============================================================================
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: rams-elec-web
+    env_file: .env
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - NEXT_PUBLIC_TRIAGE_API_URL=http://triage:8001
+      - NEXT_PUBLIC_LOADSHEDDING_API_URL=http://loadshedding:8002
+      - NEXT_PUBLIC_CHATBOT_API_URL=http://chatbot:8003
+      - NEXT_PUBLIC_DISPATCH_API_URL=http://dispatch:8004
+    depends_on:
+      triage:
+        condition: service_healthy
+      loadshedding:
+        condition: service_healthy
+      chatbot:
+        condition: service_healthy
+      dispatch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Streamlit Dashboard
+  # =============================================================================
+  streamlit:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile
+    container_name: rams-elec-streamlit
+    env_file: .env
+    ports:
+      - "8501:8501"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rams_elec
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-rams-elec-admin-2026}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # =============================================================================
+  # Airflow Webserver
+  # =============================================================================
+  airflow-webserver:
+    build:
+      context: ./etl
+      dockerfile: ../docker/Dockerfile.airflow
+    container_name: rams-elec-airflow-webserver
+    env_file: .env
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/rams_elec
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://postgres:postgres@postgres:5432/rams_elec
+    command: webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # =============================================================================
+  # Airflow Scheduler
+  # =============================================================================
+  airflow-scheduler:
+    build:
+      context: ./etl
+      dockerfile: ../docker/Dockerfile.airflow
+    container_name: rams-elec-airflow-scheduler
+    env_file: .env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres:5432/rams_elec
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://postgres:postgres@postgres:5432/rams_elec
+    command: scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # =============================================================================
+  # n8n Automation
+  # =============================================================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: rams-elec-n8n
+    env_file: .env
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-password}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=rams_elec
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=postgres
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/.n8n/workflows
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  n8n_data:

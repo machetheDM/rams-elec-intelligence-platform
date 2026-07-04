@@ -1,0 +1,168 @@
+{
+  "name": "Rams @Elec — AI Inquiry Triage & Notification",
+  "description": "Triggered when a new inquiry is submitted via web form. Classifies inquiry, estimates cost, assigns technician, and sends WhatsApp notifications.",
+  "nodes": [
+    {
+      "name": "Webhook — New Inquiry",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rams-elec-inquiry",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "name": "Call Triage Classify API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [500, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/triage/classify",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "raw_message", "value": "={{ $json.body.raw_message }}" },
+            { "name": "source", "value": "={{ $json.body.source || 'web_form' }}" },
+            { "name": "customer_name", "value": "={{ $json.body.customer_name }}" },
+            { "name": "customer_phone", "value": "={{ $json.body.customer_phone }}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Call Estimate Cost API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [750, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/triage/estimate-cost",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "service_category", "value": "={{ $json.service_category }}" },
+            { "name": "urgency", "value": "={{ $json.urgency }}" },
+            { "name": "area_zone", "value": "={{ $json.area_zone }}" },
+            { "name": "estimated_scope", "value": "={{ $json.estimated_scope }}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Call Assign Technician API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8001/triage/assign-technician",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "service_category", "value": "={{ $('Call Triage Classify API').item.json.service_category }}" },
+            { "name": "urgency", "value": "={{ $('Call Triage Classify API').item.json.urgency }}" },
+            { "name": "area_zone", "value": "={{ $('Call Triage Classify API').item.json.area_zone }}" },
+            { "name": "equipment_mentioned", "value": "={{ $('Call Triage Classify API').item.json.equipment_mentioned }}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Save Inquiry to Database",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1250, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO inquiries (customer_id, source, raw_message, classified_type, urgency_score, estimated_cost_min, estimated_cost_max, status, created_at) VALUES (NULL, '{{ $('Webhook — New Inquiry').item.json.body.source || 'web_form' }}', '{{ $('Webhook — New Inquiry').item.json.body.raw_message }}', '{{ $('Call Triage Classify API').item.json.service_category }}', {{ $('Call Triage Classify API').item.json.confidence }}, {{ $('Call Estimate Cost API').item.json.cost_min }}, {{ $('Call Estimate Cost API').item.json.cost_max }}, 'triaged', NOW()) RETURNING id"
+      }
+    },
+    {
+      "name": "Send WhatsApp to Customer",
+      "type": "n8n-nodes-base.twilio",
+      "position": [1500, 200],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:{{ $('Webhook — New Inquiry').item.json.body.customer_phone }}",
+        "message": "Rams @Elec: Thank you for your inquiry! 🔧\n\nWe've received your request about: {{ $('Call Triage Classify API').item.json.estimated_scope }}\n\nEstimated cost range: R{{ $('Call Estimate Cost API').item.json.cost_min }} – R{{ $('Call Estimate Cost API').item.json.cost_max }}\n\nOur team will respond within {{ $('Call Triage Classify API').item.json.urgency === 'emergency' ? '1 hour' : '4 hours' }}.\n\nFor emergencies, call: +27 71 101 8493"
+      }
+    },
+    {
+      "name": "Send WhatsApp to Technician",
+      "type": "n8n-nodes-base.twilio",
+      "position": [1500, 400],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:+27820000001",
+        "message": "🔔 New Job Alert — Rams @Elec\n\nService: {{ $('Call Triage Classify API').item.json.service_category }}\nUrgency: {{ $('Call Triage Classify API').item.json.urgency }}\nArea: {{ $('Call Triage Classify API').item.json.area_zone || 'Not specified' }}\n\nDescription: {{ $('Call Triage Classify API').item.json.estimated_scope }}\n\nTop recommended technician: {{ $('Call Assign Technician API').item.json.recommendations[0].name }} (Score: {{ $('Call Assign Technician API').item.json.recommendations[0].combined_score }})\n\nView in portal: https://ramsatelec.com/admin/jobs"
+      }
+    },
+    {
+      "name": "Emergency SMS to Owner",
+      "type": "n8n-nodes-base.twilio",
+      "position": [1500, 600],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_PHONE_FROM }}",
+        "to": "+27711018493",
+        "message": "🚨 EMERGENCY INQUIRY — Rams @Elec\n\n{{ $('Call Triage Classify API').item.json.estimated_scope }}\n\nCustomer: {{ $('Webhook — New Inquiry').item.json.body.customer_name || 'Unknown' }}\nPhone: {{ $('Webhook — New Inquiry').item.json.body.customer_phone || 'Not provided' }}\nArea: {{ $('Call Triage Classify API').item.json.area_zone || 'Unknown' }}\n\nCall now: +27 71 101 8493"
+      }
+    },
+    {
+      "name": "IF — Is Emergency?",
+      "type": "n8n-nodes-base.if",
+      "position": [1250, 500],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Call Triage Classify API').item.json.urgency }}",
+              "operation": "equals",
+              "value2": "emergency"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1750, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "status": "success",
+          "inquiry_id": "={{ $('Save Inquiry to Database').item.json[0].id }}",
+          "classification": "={{ $('Call Triage Classify API').item.json }}",
+          "cost_estimate": "={{ $('Call Estimate Cost API').item.json }}",
+          "recommended_technicians": "={{ $('Call Assign Technician API').item.json.recommendations }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — New Inquiry": { "main": [[ { "node": "Call Triage Classify API", "type": "main", "index": 0 } ]] },
+    "Call Triage Classify API": { "main": [[ { "node": "Call Estimate Cost API", "type": "main", "index": 0 } ]] },
+    "Call Estimate Cost API": { "main": [[ { "node": "Call Assign Technician API", "type": "main", "index": 0 } ]] },
+    "Call Assign Technician API": { "main": [[ { "node": "Save Inquiry to Database", "type": "main", "index": 0 } ]] },
+    "Save Inquiry to Database": {
+      "main": [
+        [
+          { "node": "Send WhatsApp to Customer", "type": "main", "index": 0 },
+          { "node": "Send WhatsApp to Technician", "type": "main", "index": 0 },
+          { "node": "IF — Is Emergency?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "IF — Is Emergency?": {
+      "main": [
+        [{ "node": "Emergency SMS to Owner", "type": "main", "index": 0 }],
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Emergency SMS to Owner": { "main": [[ { "node": "Respond to Webhook", "type": "main", "index": 0 } ]] }
+  }
+}

@@ -1,0 +1,81 @@
+name: Rams @Elec CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-python:
+    name: Lint Python (flake8 + black)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install flake8 black
+      - run: flake8 services/ etl/ --count --select=E9,F63,F7,F82 --show-source --statistics
+      - run: black --check services/ etl/ --diff
+
+  lint-typescript:
+    name: Lint TypeScript (ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd apps/web && npm ci && npx eslint . --max-warnings 0
+
+  test-python:
+    name: Test Python (pytest + coverage)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rams_elec_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install -r services/triage/requirements.txt
+          pip install -r services/loadshedding/requirements.txt
+          pip install pytest pytest-cov
+      - run: pytest services/ --cov=services --cov-report=xml --cov-report=term
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rams_elec_test
+          GROQ_API_KEY: test_key
+          ESKOM_SE_PUSH_API_KEY: test_key
+
+  test-nextjs:
+    name: Build Next.js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd apps/web && npm ci && npm run build
+
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f docker/Dockerfile.web -t rams-elec-web .
+      - run: docker build -f docker/Dockerfile.fastapi -t rams-elec-fastapi .
+      - run: docker build -f docker/Dockerfile.airflow -t rams-elec-airflow .

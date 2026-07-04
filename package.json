@@ -1,0 +1,17 @@
+{
+  "name": "ramsatelec-intelligence",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rams @Elec Intelligence Platform — AI-powered electrical & refrigeration services platform",
+  "scripts": {
+    "db:generate": "npm run db:generate --workspace=@ramsatelec/db",
+    "db:push": "npm run db:push --workspace=@ramsatelec/db",
+    "db:migrate": "npm run db:migrate --workspace=@ramsatelec/db",
+    "db:seed": "npm run db:seed --workspace=@ramsatelec/db",
+    "db:studio": "npm run db:studio --workspace=@ramsatelec/db"
+  },
+  "workspaces": [
+    "packages/*",
+    "frontend"
+  ]
+}

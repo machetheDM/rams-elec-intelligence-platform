@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-industrial-950 text-industrial-100 antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-8 py-3.5 bg-brand-500 hover:bg-brand-600 text-white font-semibold rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-brand-500/25 active:scale-[0.98];
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center px-8 py-3.5 border-2 border-industrial-600 hover:border-brand-500 text-industrial-200 hover:text-brand-400 font-semibold rounded-lg transition-all duration-300;
+  }
+  .btn-emergency {
+    @apply inline-flex items-center justify-center px-8 py-3.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-red-600/25 animate-pulse-glow;
+  }
+  .section-heading {
+    @apply text-3xl sm:text-4xl lg:text-5xl font-bold text-white;
+  }
+  .section-subheading {
+    @apply text-industrial-400 text-lg max-w-2xl;
+  }
+  .card {
+    @apply bg-industrial-900 border border-industrial-800 rounded-2xl p-6 hover:border-industrial-700 transition-all duration-300;
+  }
+  .card-glow {
+    @apply card hover:border-brand-600/50 hover:shadow-lg hover:shadow-brand-500/5;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-brand-400 to-brand-600 bg-clip-text text-transparent;
+  }
+  .glass {
+    @apply bg-industrial-900/80 backdrop-blur-xl border border-industrial-800;
+  }
+}

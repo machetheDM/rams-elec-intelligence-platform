@@ -1,0 +1,65 @@
+{
+  "name": "Rams @Elec — Job Assignment Notifications",
+  "description": "Triggered when a technician is assigned to a job. Sends WhatsApp notifications to both technician and customer.",
+  "nodes": [
+    {
+      "name": "Webhook — Job Assigned",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": { "httpMethod": "POST", "path": "job-assigned", "responseMode": "lastNode" }
+    },
+    {
+      "name": "Get Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "position": [500, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT j.id, j.scheduled_date, j.area_zone, j.urgency, st.name as service_name, c.name as customer_name, c.phone as customer_phone, t.name as tech_name, t.phone as tech_phone FROM jobs j JOIN service_types st ON j.service_type_id = st.id JOIN customers c ON j.customer_id = c.id JOIN technicians t ON j.technician_id = t.id WHERE j.id = '{{ $json.job_id }}'"
+      }
+    },
+    {
+      "name": "Notify Technician (WhatsApp)",
+      "type": "n8n-nodes-base.twilio",
+      "position": [750, 200],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:{{ $json.tech_phone }}",
+        "message": "🔔 New Job Assigned — Rams @Elec\n\nService: {{ $json.service_name }}\nArea: {{ $json.area_zone }}\nDate: {{ $json.scheduled_date }}\nUrgency: {{ $json.urgency }}\nCustomer: {{ $json.customer_name }}\nContact: {{ $json.customer_phone }}\n\nView job details: https://ramsatelec.com/tech/jobs/{{ $json.id }}"
+      }
+    },
+    {
+      "name": "Notify Customer (WhatsApp)",
+      "type": "n8n-nodes-base.twilio",
+      "position": [750, 400],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $env.TWILIO_WHATSAPP_FROM }}",
+        "to": "whatsapp:{{ $json.customer_phone }}",
+        "message": "✅ Job Confirmed — Rams @Elec\n\nYour {{ $json.service_name }} has been scheduled for {{ $json.scheduled_date }}.\n\nTechnician: {{ $json.tech_name }}\nArea: {{ $json.area_zone }}\n\nTrack your job: https://ramsatelec.com/portal\nNeed to reschedule? Call: +27 71 101 8493"
+      }
+    },
+    {
+      "name": "Log Notifications",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1000, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO notification_log (customer_id, channel, message_type, content, status) SELECT customer_id, 'whatsapp', 'job_update', 'Job {{ $json.id }} assigned to {{ $json.tech_name }}', 'sent' FROM jobs WHERE id = '{{ $json.id }}'"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Job Assigned": { "main": [[ { "node": "Get Job Details", "type": "main", "index": 0 } ]] },
+    "Get Job Details": {
+      "main": [[
+        { "node": "Notify Technician (WhatsApp)", "type": "main", "index": 0 },
+        { "node": "Notify Customer (WhatsApp)", "type": "main", "index": 0 }
+      ]]
+    },
+    "Notify Technician (WhatsApp)": { "main": [[ { "node": "Log Notifications", "type": "main", "index": 0 } ]] },
+    "Notify Customer (WhatsApp)": { "main": [[ { "node": "Log Notifications", "type": "main", "index": 0 } ]] }
+  }
+}
