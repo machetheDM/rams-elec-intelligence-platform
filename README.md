@@ -298,6 +298,42 @@ ramsatelec-intelligence/
 
 ---
 
+## 🔒 SecureDevOps Pipeline
+
+[![Security Scan](https://github.com/machetheDM/rams-elec-intelligence-platform/actions/workflows/security.yml/badge.svg)](https://github.com/machetheDM/rams-elec-intelligence-platform/actions/workflows/security.yml)
+
+This platform includes a complete **SecureDevOps Pipeline** built as part of ECCU MSc Cybersecurity Term 3 coursework:
+
+| Module | Description | Status |
+|--------|-------------|--------|
+| **Module 1** | Security Audit — OWASP Top 10 + STRIDE Threat Model | ✅ Complete |
+| **Module 2** | Secure Coding — Input validation, JWT auth, security headers, audit logging | ✅ Complete |
+| **Module 3** | CI/CD Pipeline — 6-job DevSecOps workflow (SAST, SCA, secrets, containers) | ✅ Complete |
+| **Module 4** | Cloud Security Architecture — Azure design, Terraform IaC, Zero Trust guide | ✅ Complete |
+| **Module 5** | Documentation — Security runbook, README, portfolio write-up | ✅ Complete |
+
+### Security Tools
+
+| Tool | Type | Purpose |
+|------|------|---------|
+| Bandit | SAST | Python vulnerability scanning |
+| Safety | SCA | Python dependency CVE detection |
+| npm audit | SCA | Node.js dependency CVE detection |
+| ESLint Security | SAST | JavaScript security anti-patterns |
+| detect-secrets | Secret scanning | Credential detection in codebase |
+| truffleHog | Secret scanning | Git history secret detection |
+| Trivy | Container scanning | Docker image CVE detection |
+| Terraform | IaC | Secure cloud resource provisioning |
+| Microsoft Sentinel | SIEM | Cloud security monitoring + SOAR |
+
+### Academic Context
+
+Built applying **ECCU510 (Secure Programming — CASE)** and **ECCU524 (Cloud Security — CCSE)** coursework from MSc Cybersecurity, Cloud Security Architecture at EC-Council University.
+
+Extends the author's published research on SQL injection and XSS mitigation (ECCU Cyber Journal, 2026) into a practical DevSecOps implementation.
+
+> **Disclaimer**: This is an academic project demonstrating security engineering practices. It does not constitute a professional security audit.
+
 ---
 
 ## Built For
