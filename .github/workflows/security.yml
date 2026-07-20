@@ -1,3 +1,53 @@
+# =============================================================================
+# Rams @Elec — Security Scan Pipeline (DevSecOps)
+# =============================================================================
+#
+# This workflow implements the "shift-left" DevSecOps principle: security
+# checks run automatically on every push and PR, catching vulnerabilities
+# before they reach production.
+#
+# PIPELINE ARCHITECTURE:
+#   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+#   │ sast-python  │  │ sast-nodejs  │  │   secret-    │  │  container-  │
+#   │ Bandit +     │  │ npm audit +  │  │  detection   │  │  security    │
+#   │ Safety +     │  │ ESLint sec.  │  │ detect-      │  │ Trivy image  │
+#   │ pip-audit    │  │              │  │ secrets +    │  │ scan         │
+#   │              │  │              │  │ truffleHog   │  │              │
+#   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+#          │                 │                 │                 │
+#          └─────────────────┴────────┬────────┴─────────────────┘
+#                                     │
+#                          ┌──────────┴──────────┐
+#                          │  dependency-review  │  (PR only)
+#                          └──────────┬──────────┘
+#                                     │
+#                          ┌──────────┴──────────┐
+#                          │  security-report    │  (summary + PR comment)
+#                          └─────────────────────┘
+#
+# FAILURE CONDITIONS:
+#   - Bandit: HIGH severity findings → pipeline FAILS
+#   - Trivy: CRITICAL CVEs → pipeline FAILS
+#   - npm audit: HIGH severity → WARNING only (some CVEs have no fix)
+#   - detect-secrets: verified secrets → pipeline FAILS
+#   - Dependency Review: HIGH severity → pipeline FAILS (PR only)
+#
+# TRIGGERS:
+#   - push to main/master: full scan on every merge
+#   - pull_request to main/master: pre-merge security gate
+#   - schedule (weekly): catch newly disclosed CVEs
+#   - workflow_dispatch: manual trigger for ad-hoc scans
+#
+# Academic Context:
+#   ECCU510 Secure Programming (CASE) + ECCU524 Cloud Security (CCSE)
+#   MSc Cybersecurity, Cloud Security Architecture — EC-Council University
+#   Term 3, July 2026
+#
+# References:
+#   OWASP SAMM v2 — Verification practice (Level 2: Automated)
+#   https://owaspsamm.org/model/verification/
+# =============================================================================
+
 name: Security Scan Pipeline
 
 on:
@@ -6,13 +56,14 @@ on:
   pull_request:
     branches: [main, master]
   schedule:
-    - cron: "0 6 * * 1"  # Weekly: Monday 06:00 UTC
-  workflow_dispatch:       # Manual trigger
+    - cron: "0 6 * * 1"  # Weekly: Monday 06:00 UTC (08:00 SAST)
+  workflow_dispatch:       # Manual trigger from GitHub Actions UI
 
+# Minimum required permissions — principle of least privilege
 permissions:
   contents: read
-  security-events: write
-  pull-requests: write
+  security-events: write   # Needed for SARIF uploads
+  pull-requests: write     # Needed for PR comments
 
 jobs:
   # ===========================================================================

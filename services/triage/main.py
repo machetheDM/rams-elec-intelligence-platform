@@ -6,6 +6,23 @@ FastAPI microservice providing:
 - POST /triage/estimate-cost   — XGBoost cost prediction with SHAP explanations
 - POST /triage/assign-technician — Skillset + area + workload scoring
 - GET  /triage/health          — Service health check
+
+SECURITY HARDENING (Module 2 — July 2026):
+  - CORS: Replaced allow_origins=["*"] with specific origins via security.setup
+  - Auth: API key required for service-to-service calls
+  - Input validation: Pydantic models hardened with:
+      - extra='forbid' (rejects unexpected fields)
+      - str_strip_whitespace=True (auto-trims input)
+      - max_length on all string fields
+      - SA phone number validation (E.164 normalisation)
+      - LLM prompt injection sanitisation (strips control chars, code fences)
+      - Service category and urgency enum validation
+  - Audit logging: SecurityLogger emits structured JSON to stdout + DB
+  - Security headers: CSP, X-Frame-Options, etc. via SecurityHeadersMiddleware
+  - Rate limiting: 100 req/min per IP via RateLimiterMiddleware
+
+  See: security/setup.py, security/input_validation/validators.py
+  Docs: docs/security/secure-coding-implementation.md
 """
 
 import os

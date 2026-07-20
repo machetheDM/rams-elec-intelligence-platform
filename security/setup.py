@@ -1,13 +1,36 @@
 """
 Security Setup — Apply all security middleware to a FastAPI app
 ================================================================
-Single import to harden any FastAPI service.
+Single import to harden any FastAPI service with defence-in-depth.
+
+This is the primary entry point for security hardening. Instead of
+manually adding each middleware, services call this one function.
+
+MIDDLEWARE EXECUTION ORDER (outermost → innermost):
+  1. CORS          — Reject requests from unknown origins (first line of defence)
+  2. Rate Limiter  — Throttle excessive requests before they hit auth
+  3. API Key Auth  — Verify service-to-service identity
+  4. JWT Auth      — Verify user identity + attach roles
+  5. Security Headers — Add headers to all responses (innermost, runs last)
+
+Why this order matters:
+  - CORS runs first: reject cross-origin requests before any processing
+  - Rate limiter runs before auth: prevent brute-force attacks on login
+  - API key before JWT: service identity checked before user identity
+  - Headers run last: ensure all responses (including errors) have security headers
 
 Usage:
     from security.setup import apply_security_middleware
 
     app = FastAPI()
-    apply_security_middleware(app, enable_auth=True, cors_origins=["https://ramsatelec.co.za"])
+    apply_security_middleware(
+        app,
+        enable_auth=True,       # Require JWT for user endpoints
+        enable_api_key=True,    # Require API key for service-to-service
+        cors_origins=["https://ramsatelec.co.za", "http://localhost:3000"],
+        rate_limit=100,         # 100 requests per minute per IP
+        rate_window=60,
+    )
 """
 
 from fastapi import FastAPI
@@ -27,15 +50,49 @@ def apply_security_middleware(
     rate_limit: int = 100,
     rate_window: int = 60,
 ) -> None:
-    """Apply all security middleware to a FastAPI application."""
+    """
+    Apply all security middleware to a FastAPI application.
+
+    This function replaces the insecure CORS wildcard pattern:
+        app.add_middleware(CORSMiddleware, allow_origins=["*"])  # ❌ INSECURE
+
+    With a layered defence-in-depth approach:
+        CORS → Rate Limiter → API Key → JWT → Security Headers  # ✅ SECURE
+
+    Parameters
+    ----------
+    app : FastAPI
+        The FastAPI application instance to harden.
+    enable_auth : bool
+        If True, enable JWT authentication middleware.
+        Use for services with user-facing endpoints (triage, dispatch).
+    enable_api_key : bool
+        If True, enable API key authentication middleware.
+        Use for all services to verify service-to-service calls.
+    cors_origins : list[str] | None
+        Allowed CORS origins. Defaults to localhost:3000 only.
+        In production, set to your actual frontend domain.
+    rate_limit : int
+        Maximum requests per IP address within the rate window.
+        Default: 100 (suitable for most API endpoints).
+    rate_window : int
+        Rate limit window in seconds. Default: 60 (1 minute).
+    """
+    # Default to localhost for development — override in production
     if cors_origins is None:
         cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
-    # Remove existing CORS middleware (replace wildcard)
+    # ── Step 1: Remove any existing CORS middleware ─────────────────
+    # This is critical: many services start with allow_origins=["*"]
+    # which we must replace with specific origins.
     app.user_middleware = [
         m for m in app.user_middleware
         if m.cls != CORSMiddleware
     ]
+
+    # ── Step 2: Add CORS with specific origins ──────────────────────
+    # Only allow known frontend origins + specific HTTP methods.
+    # X-API-Key header is required for service-to-service auth.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -44,16 +101,27 @@ def apply_security_middleware(
         allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     )
 
-    # Security headers
+    # ── Step 3: Security headers on all responses ───────────────────
+    # CSP, X-Frame-Options, HSTS, etc. — see security_headers.py
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # Rate limiting
-    app.add_middleware(RateLimiterMiddleware, max_requests=rate_limit, window_seconds=rate_window)
+    # ── Step 4: Rate limiting per IP ────────────────────────────────
+    # Prevents brute-force, DoS, and API abuse.
+    # Uses in-memory sliding window (Redis in production).
+    app.add_middleware(
+        RateLimiterMiddleware,
+        max_requests=rate_limit,
+        window_seconds=rate_window,
+    )
 
-    # API key auth (for service-to-service calls)
+    # ── Step 5: API key authentication (optional) ───────────────────
+    # Verifies service-to-service calls using SHA-256 hashed keys.
+    # Enable for all services that receive internal API calls.
     if enable_api_key:
         app.add_middleware(APIKeyMiddleware)
 
-    # JWT auth (for user-facing endpoints)
+    # ── Step 6: JWT authentication (optional) ───────────────────────
+    # Verifies user identity and attaches role to request.state.
+    # Enable for services with user-facing endpoints.
     if enable_auth:
         app.add_middleware(JWTAuthMiddleware)

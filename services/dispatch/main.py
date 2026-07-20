@@ -3,6 +3,25 @@ Rams @Elec — Smart Dispatch & Job Assignment Service
 
 Skillset-based technician recommendation (NOT GPS routing).
 Scores technicians on: skill match (40%), availability (40%), area familiarity (20%).
+
+SECURITY HARDENING (Module 2 — July 2026):
+  - CORS: Replaced allow_origins=["*"] with specific origins via security.setup
+  - Auth: API key required for service-to-service calls
+  - Input validation: Pydantic models hardened with:
+      - extra='forbid' (rejects unexpected fields)
+      - str_strip_whitespace=True (auto-trims input)
+      - max_length on all string fields
+      - Area zone whitelist validation (40+ valid SA zones)
+      - Service category and urgency enum validation
+  - Audit logging: SecurityLogger emits structured JSON to stdout + DB
+  - Security headers: CSP, X-Frame-Options, etc. via SecurityHeadersMiddleware
+  - Rate limiting: 100 req/min per IP via RateLimiterMiddleware
+
+  CRITICAL: /dispatch/assign was previously unauthenticated — anyone could
+  assign technicians. Now requires API key authentication.
+
+  See: security/setup.py, security/input_validation/validators.py
+  Docs: docs/security/secure-coding-implementation.md
 """
 
 import os
