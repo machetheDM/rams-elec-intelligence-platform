@@ -9,6 +9,7 @@ FastAPI microservice providing:
 """
 
 import os
+import sys
 import json
 import logging
 from datetime import datetime
@@ -18,9 +19,18 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from sqlalchemy import create_engine, text
+
+# Add project root to path for security imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+from security.setup import apply_security_middleware
+from security.input_validation.validators import (
+    validate_phone_sa, validate_area_zone,
+    validate_service_category, validate_urgency,
+    sanitize_prompt_input, MAX_MESSAGE_LENGTH,
+)
+from security.logging.security_logger import SecurityLogger
 
 load_dotenv()
 
@@ -33,13 +43,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Apply security middleware (replaces CORS wildcard)
+apply_security_middleware(
+    app,
+    enable_api_key=True,
+    cors_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        os.getenv("FRONTEND_URL", ""),
+    ],
 )
+
+# Security audit logger
+sec_log = SecurityLogger(engine=None, service_name="triage")
 
 # ---------------------------------------------------------------------------
 # Database
@@ -107,10 +123,21 @@ load_model()
 # ---------------------------------------------------------------------------
 
 class InquiryInput(BaseModel):
-    raw_message: str = Field(..., description="Raw inquiry text from customer")
-    source: str = Field(default="web_form", description="Source channel")
-    customer_name: Optional[str] = None
-    customer_phone: Optional[str] = None
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    raw_message: str = Field(..., max_length=MAX_MESSAGE_LENGTH, description="Raw inquiry text from customer")
+    source: str = Field(default="web_form", max_length=50, description="Source channel")
+    customer_name: Optional[str] = Field(None, max_length=100)
+    customer_phone: Optional[str] = Field(None, max_length=15, description="SA phone number (+27...)")
+
+    @field_validator("customer_phone")
+    @classmethod
+    def phone_must_be_sa(cls, v):
+        return validate_phone_sa(v)
+
+    @field_validator("raw_message")
+    @classmethod
+    def sanitize_message(cls, v):
+        return sanitize_prompt_input(v)
 
 
 class ClassificationResult(BaseModel):
@@ -123,11 +150,27 @@ class ClassificationResult(BaseModel):
 
 
 class CostEstimateInput(BaseModel):
-    service_category: str
-    urgency: str
-    area_zone: Optional[str] = None
-    equipment_type: Optional[str] = None
-    estimated_scope: str
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    service_category: str = Field(..., max_length=50)
+    urgency: str = Field(..., max_length=20)
+    area_zone: Optional[str] = Field(None, max_length=100)
+    equipment_type: Optional[str] = Field(None, max_length=100)
+    estimated_scope: str = Field(..., max_length=500)
+
+    @field_validator("service_category")
+    @classmethod
+    def category_must_be_valid(cls, v):
+        return validate_service_category(v)
+
+    @field_validator("urgency")
+    @classmethod
+    def urgency_must_be_valid(cls, v):
+        return validate_urgency(v)
+
+    @field_validator("area_zone")
+    @classmethod
+    def zone_must_be_valid(cls, v):
+        return validate_area_zone(v)
 
 
 class CostEstimateResult(BaseModel):
