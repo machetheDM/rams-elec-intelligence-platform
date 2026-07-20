@@ -79,3 +79,27 @@ jobs:
       - run: docker build -f docker/Dockerfile.web -t rams-elec-web .
       - run: docker build -f docker/Dockerfile.fastapi -t rams-elec-fastapi .
       - run: docker build -f docker/Dockerfile.airflow -t rams-elec-airflow .
+
+  # ===========================================================================
+  # Security Gate — must pass before deployment
+  # ===========================================================================
+  security-gate:
+    name: "Security Gate"
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-typescript, test-python, test-nextjs, docker-build]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Security gate check
+        run: |
+          echo "============================================"
+          echo "SECURITY GATE — All CI checks passed"
+          echo "============================================"
+          echo ""
+          echo "  lint-python:    ${{ needs.lint-python.result }}"
+          echo "  lint-typescript: ${{ needs.lint-typescript.result }}"
+          echo "  test-python:    ${{ needs.test-python.result }}"
+          echo "  test-nextjs:    ${{ needs.test-nextjs.result }}"
+          echo "  docker-build:   ${{ needs.docker-build.result }}"
+          echo ""
+          echo "NOTE: Full security scan runs in security.yml workflow."
+          echo "Deploy only after security.yml passes with 0 HIGH/CRITICAL findings."

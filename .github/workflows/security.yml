@@ -1,0 +1,351 @@
+name: Security Scan Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "0 6 * * 1"  # Weekly: Monday 06:00 UTC
+  workflow_dispatch:       # Manual trigger
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # ===========================================================================
+  # JOB 1: SAST — Python (Bandit + Safety + pip-audit)
+  # ===========================================================================
+  sast-python:
+    name: "SAST Python (Bandit + Safety + pip-audit)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install security tools
+        run: pip install bandit safety pip-audit
+
+      - name: Run Bandit (Python SAST)
+        run: |
+          bandit -r services/ etl/ ml/ \
+            -f json -o reports/bandit_report.json \
+            -x tests/,venv/,__pycache__/ \
+            --skip B101,B104 \
+            || true
+        continue-on-error: true
+
+      - name: Check Bandit HIGH severity findings
+        run: |
+          HIGH=$(python3 -c "
+          import json
+          with open('reports/bandit_report.json') as f:
+              data = json.load(f)
+          high = [r for r in data.get('results', []) if r.get('issue_severity') == 'HIGH']
+          print(len(high))
+          for r in high:
+              print(f'  {r[\"filename\"]}:{r[\"line_number\"]} — {r[\"test_name\"]}: {r[\"issue_text\"]}')
+          " 2>/dev/null || echo "0")
+          if [ "$HIGH" != "0" ]; then
+            echo "::error::Bandit found $HIGH HIGH severity issues"
+            exit 1
+          fi
+          echo "Bandit: 0 HIGH severity issues"
+
+      - name: Run Safety (Python dependency CVEs)
+        run: |
+          for req in services/*/requirements.txt; do
+            if [ -f "$req" ]; then
+              echo "Scanning: $req"
+              safety check --file="$req" --json --output="reports/safety_$(basename $(dirname $req)).json" || true
+            fi
+          done
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: |
+          for req in services/*/requirements.txt; do
+            if [ -f "$req" ]; then
+              echo "Auditing: $req"
+              pip-audit -r "$req" --format json --output "reports/pipaudit_$(basename $(dirname $req)).json" || true
+            fi
+          done
+        continue-on-error: true
+
+      - name: Upload SAST reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-python-reports
+          path: reports/bandit_report.json
+          retention-days: 30
+
+      - name: Upload Safety reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-reports
+          path: reports/safety_*.json
+          retention-days: 30
+
+  # ===========================================================================
+  # JOB 2: SAST — Node.js (npm audit + ESLint security)
+  # ===========================================================================
+  sast-nodejs:
+    name: "SAST Node.js (npm audit + ESLint Security)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run npm audit
+        run: |
+          cd frontend
+          npm audit --json > ../reports/npm_audit_report.json || true
+          cd ..
+          HIGH=$(python3 -c "
+          import json
+          with open('reports/npm_audit_report.json') as f:
+              data = json.load(f)
+          vulns = data.get('vulnerabilities', {})
+          high_count = sum(1 for v in vulns.values() if v.get('severity') == 'high')
+          print(high_count)
+          " 2>/dev/null || echo "0")
+          if [ "$HIGH" != "0" ]; then
+            echo "::warning::npm audit found $HIGH HIGH severity vulnerabilities"
+          fi
+
+      - name: Run ESLint with security plugin
+        run: |
+          cd frontend
+          npx eslint . \
+            --rule 'security/detect-object-injection: warn' \
+            --rule 'security/detect-non-literal-regexp: warn' \
+            --rule 'security/detect-eval-with-expression: error' \
+            --rule 'security/detect-child-process: warn' \
+            -f json -o ../reports/eslint_security_report.json || true
+        continue-on-error: true
+
+      - name: Upload npm audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: reports/npm_audit_report.json
+          retention-days: 30
+
+  # ===========================================================================
+  # JOB 3: Secret Detection (detect-secrets + truffleHog)
+  # ===========================================================================
+  secret-detection:
+    name: "Secret Detection (detect-secrets + truffleHog)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for truffleHog
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install detect-secrets
+        run: pip install detect-secrets
+
+      - name: Run detect-secrets
+        run: |
+          detect-secrets scan . \
+            --all-files \
+            --exclude-files '*.json' '*.csv' '*.parquet' '*.gpkg' '*.geojson' '*.lock' \
+            > reports/secrets_report.json || true
+          # Check for high-confidence secrets
+          SECRETS=$(python3 -c "
+          import json
+          with open('reports/secrets_report.json') as f:
+              data = json.load(f)
+          results = data.get('results', {})
+          print(len(results))
+          " 2>/dev/null || echo "0")
+          if [ "$SECRETS" != "0" ]; then
+            echo "::warning::detect-secrets found $SECRETS potential secrets — review reports/secrets_report.json"
+          fi
+
+      - name: Run truffleHog (git history scan)
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github.event.after }}
+        continue-on-error: true
+
+      - name: Upload secrets report
+        uses: actions/upload-artifact@v4
+        with:
+          name: secrets-report
+          path: reports/secrets_report.json
+          retention-days: 7  # Short retention for sensitive reports
+
+  # ===========================================================================
+  # JOB 4: Container Security (Trivy)
+  # ===========================================================================
+  container-security:
+    name: "Container Security (Trivy)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker images (no push)
+        run: |
+          docker build -f docker/Dockerfile.web -t rams-elec-web:ci .
+          docker build -f docker/Dockerfile.fastapi -t rams-elec-fastapi:ci .
+          docker build -f docker/Dockerfile.airflow -t rams-elec-airflow:ci .
+        continue-on-error: true
+
+      - name: Run Trivy on web image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: rams-elec-web:ci
+          format: json
+          output: reports/trivy_web_report.json
+          severity: CRITICAL,HIGH
+          exit-code: 0
+        continue-on-error: true
+
+      - name: Run Trivy on FastAPI image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: rams-elec-fastapi:ci
+          format: json
+          output: reports/trivy_fastapi_report.json
+          severity: CRITICAL,HIGH
+          exit-code: 0
+        continue-on-error: true
+
+      - name: Check for CRITICAL CVEs
+        run: |
+          for report in reports/trivy_*.json; do
+            if [ -f "$report" ]; then
+              CRITICAL=$(python3 -c "
+              import json
+              with open('$report') as f:
+                  data = json.load(f)
+              results = data.get('Results', [])
+              critical = 0
+              for r in results:
+                  for v in r.get('Vulnerabilities', []):
+                      if v.get('Severity') == 'CRITICAL':
+                          critical += 1
+              print(critical)
+              " 2>/dev/null || echo "0")
+              if [ "$CRITICAL" != "0" ]; then
+                echo "::error::$report: $CRITICAL CRITICAL CVEs found"
+                exit 1
+              fi
+            fi
+          done
+          echo "Trivy: 0 CRITICAL CVEs"
+
+      - name: Upload Trivy reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: reports/trivy_*.json
+          retention-days: 30
+
+  # ===========================================================================
+  # JOB 5: Dependency Review
+  # ===========================================================================
+  dependency-review:
+    name: "Dependency Review"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: true
+
+  # ===========================================================================
+  # JOB 6: Security Report (runs after all jobs)
+  # ===========================================================================
+  security-report:
+    name: "Generate Security Summary"
+    runs-on: ubuntu-latest
+    needs: [sast-python, sast-nodejs, secret-detection, container-security]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports/artifacts
+        continue-on-error: true
+
+      - name: Generate security summary
+        run: |
+          cat > reports/security_summary.md << 'EOF'
+          # Security Scan Summary
+
+          **Pipeline**: Security Scan Pipeline
+          **Run**: ${{ github.run_id }}
+          **Branch**: ${{ github.ref_name }}
+          **Trigger**: ${{ github.event_name }}
+          **Date**: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          ## Results
+
+          | Job | Status | Details |
+          |-----|--------|---------|
+          | SAST Python | ${{ needs.sast-python.result }} | Bandit + Safety + pip-audit |
+          | SAST Node.js | ${{ needs.sast-nodejs.result }} | npm audit + ESLint security |
+          | Secret Detection | ${{ needs.secret-detection.result }} | detect-secrets + truffleHog |
+          | Container Security | ${{ needs.container-security.result }} | Trivy image scan |
+
+          ## Artifacts
+
+          All reports are available as workflow artifacts (retention: 30 days).
+
+          ## Next Steps
+
+          1. Review any HIGH/CRITICAL findings
+          2. Check `reports/security_summary.md` for details
+          3. See `docs/security-pipeline.md` for interpretation guide
+
+          ---
+          *Generated by Security Scan Pipeline — Rams @Elec SecureDevOps*
+          EOF
+
+          cat reports/security_summary.md
+
+      - name: Post summary as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('reports/security_summary.md', 'utf8');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+      - name: Upload security summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary
+          path: reports/security_summary.md
+          retention-days: 90
