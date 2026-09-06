@@ -10,7 +10,7 @@
 
 ## Screenshots
 
-> Screenshots coming soon — the inquiry-triage flow returning a cost estimate with SHAP explanations, and the Streamlit analytics dashboard.
+> Screenshots coming soon — the landing page hero with live load-shedding widget, gallery with project photography, services catalog, admin analytics dashboards, and the inquiry-triage flow returning a cost estimate with SHAP explanations.
 
 ---
 
@@ -45,6 +45,7 @@ Small South African electrical and refrigeration companies run on phone calls, W
 - **Security Hardening:** Fail-closed API key gate (unknown environment refuses to start), CORS locked to specific origins, Pydantic `extra="forbid"` + `sanitize_prompt_input` on all LLM-facing fields, CSP/X-Frame-Options headers, per-IP rate limiting
 
 ### The Result
+- **38-route Next.js frontend** that replaces the original static brochure — 11-section landing page, gallery with project portfolio, services catalog with process section, customer portal, admin analytics (7 dashboard pages), AI-powered inquiry form, and RAG chatbot
 - **XGBoost quote estimator:** MAE R11,280.65, R^2 0.5121, CV MAE R10,393.38 (108/27 split, synthetic data — disclosed honestly in the UI and metrics.json)
 - **6 microservices** with a shared security middleware stack, consistent health checks, API key auth, and audit logging
 - **CrewAI crew** that is measurably slower but architecturally extensible — a fourth specialist is a configuration change, not a rewrite. Benchmark: [crew-vs-sequential.md](docs/crew-vs-sequential.md)
@@ -68,7 +69,7 @@ Two layers in one repo:
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 15, TypeScript, Tailwind CSS, NextAuth v5 |
+| Frontend | Next.js 15, TypeScript, Tailwind CSS, NextAuth v5, Recharts |
 | ML Microservices | FastAPI, XGBoost, SHAP, scikit-learn |
 | LLM / RAG | Groq llama-3.3-70b, FAISS, LangChain, sentence-transformers |
 | Multi-Agent | CrewAI (3-agent sequential crew, tools over internal HTTP) |
@@ -76,7 +77,7 @@ Two layers in one repo:
 | Database | PostgreSQL (Supabase), Prisma ORM |
 | AWS ML | SageMaker (Training + Registry + Serverless Inference), Glue/Athena, Textract, Bedrock |
 | Automation | n8n (WhatsApp/SMS via Twilio), Apache Airflow |
-| Analytics | Streamlit, Plotly, Prophet |
+| Analytics | Recharts (Next.js), Streamlit, Plotly, Prophet |
 | Experiment Tracking | MLflow |
 | IaC | Terraform (AWS: Lambda, S3, SageMaker, Glue, Budgets; Azure: designed, not provisioned) |
 | Security | Bandit, Safety, detect-secrets, truffleHog, Trivy, ESLint Security |
@@ -206,6 +207,33 @@ Two layers in one repo:
 
 ---
 
+### 7. Frontend Architecture (38 Routes)
+`frontend/` — Next.js 15 App Router with strict separation of concerns:
+
+**Public pages (no auth):**
+- `/` — 11-section landing page: Hero with live load-shedding widget, AI inquiry form, services bento grid, process workflow ("Blueprint to Mastery"), ML quote estimator stats, risk intelligence, about section with image + stat overlay, security/trust panel, testimonials, load-shedding alerts signup, contact information (phone/email/location/hours), closing CTA
+- `/services` — Full-bleed image header, 3 featured capability cards, service catalog with indicative pricing, process section, emergency CTA
+- `/gallery` — 9 projects across 4 filterable categories (cold rooms, electrical, HVAC, emergency) with representative imagery and transparency disclosure
+- `/inquire` — AI-powered inquiry form
+- `/login` — NextAuth v5 credentials provider
+
+**Customer portal (auth-gated):**
+- `/dashboard`, `/equipment`, `/service-history`, `/compliance`, `/chatbot`
+
+**Admin analytics (7 Recharts dashboard pages):**
+- Overview, inquiries, revenue, equipment, technicians, load-shedding impact, follow-up sentiment/satisfaction
+
+**Architecture patterns:**
+- `src/lib/api/*.ts` = data fetching (no React), `src/hooks/*.ts` = headless state (zero markup), `src/components/**` = presentation only
+- All browser-to-service calls go through same-origin `src/app/api/*/route.ts` proxy routes that inject `INTERNAL_API_KEY` server-side — no API key ever reaches the browser
+- Prisma singleton with explicit `datasourceUrl` override to prevent `.env` auto-loading bugs
+- Tailwind design system: `brand-*` (amber) + `industrial-*` (slate), blueprint grid textures, instrument-panel aesthetics
+- CSP, X-Frame-Options, COOP, CORP, Permissions-Policy security headers on every response
+
+**Skills demonstrated:** Next.js App Router architecture, NextAuth v5, server-side API proxying, Recharts data visualisation, responsive design systems, Content Security Policy engineering.
+
+---
+
 ## What This Project Demonstrates
 
 ### AI / ML Engineering
@@ -223,10 +251,11 @@ Two layers in one repo:
 - Airflow DAG orchestration
 
 ### Full-Stack Development
-- Next.js 15 App Router with NextAuth v5
+- Next.js 15 App Router with NextAuth v5 (38 routes — 18 pages, 17 API proxies, icon route)
+- 11-section landing page, gallery with filtering, services catalog, customer portal, 7 admin analytics dashboards
 - 6 FastAPI microservices with shared security middleware
-- Prisma ORM with PostgreSQL
-- Streamlit analytics dashboard with Prophet forecasting
+- Prisma ORM with PostgreSQL, comprehensive seed data (22 customers, 60 jobs, 25 follow-ups)
+- Recharts analytics dashboards replacing legacy Streamlit
 
 ### Cloud & DevOps
 - AWS Terraform (Lambda, S3, SageMaker, Glue, Budgets)

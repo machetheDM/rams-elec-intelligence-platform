@@ -60,11 +60,11 @@ The platform replaces a static brochure website for a real South African electri
     │   Lambda (sentiment Function URL)   │
     └─────────────────────────────────────┘
 
-    ┌──────────────┐    ┌────────────────────┐
-    │ Airflow DAGs │    │ Streamlit Dashboard │
-    │ ETL + alerts │    │ 6 pages + Prophet   │
-    └──────┬───────┘    └────────┬───────────┘
-           │                     │
+    ┌──────────────┐    ┌────────────────────────┐
+    │ Airflow DAGs │    │ Recharts Analytics     │
+    │ ETL + alerts │    │ 7 admin dashboard pages│
+    └──────┬───────┘    │ (replaced Streamlit)   │
+           │            └────────┬───────────────┘
     ┌──────┴──────┐              └──── PostgreSQL
     │ n8n         │
     │ WhatsApp/SMS│──── Twilio
@@ -254,14 +254,24 @@ ramsatelec-intelligence/
 │   ├── rate_limiter.py       # Per-IP rate limiting
 │   ├── input_sanitiser.py    # sanitize_prompt_input()
 │   └── security_logger.py    # Structured JSON audit events
-├── frontend/                 # Next.js 15 site
+├── frontend/                 # Next.js 15 site (38 routes)
 │   └── src/
-│       ├── app/(public)/     # Home, Services, Inquiry
-│       ├── app/(portal)/     # Customer dashboard
-│       ├── app/api/*/route.ts # Same-origin proxy routes
+│       ├── app/(public)/     # Home (11 sections), Services,
+│       │                     #   Gallery, Inquiry, Login
+│       ├── app/(portal)/     # Dashboard, Equipment, History,
+│       │                     #   Compliance, Chatbot
+│       ├── app/admin/        # Jobs Kanban + 7 analytics pages
+│       │   └── analytics/    #   (Recharts: overview, inquiries,
+│       │                     #    revenue, equipment, technicians,
+│       │                     #    load-shedding, follow-ups)
+│       ├── app/api/*/route.ts # 17 same-origin proxy routes
 │       ├── lib/api/          # Data fetching (no React)
 │       ├── hooks/            # Headless state (zero markup)
 │       └── components/       # Presentation only
+│           ├── home/         #   HeroSection, AboutSection,
+│           │                 #   ProcessSection, ContactSection,
+│           │                 #   CtaSection, SecurityTrustSection
+│           └── layout/       #   Navbar, Footer
 ├── terraform/
 │   ├── aws/                  # Module 11: Lambda, S3, SageMaker,
 │   │   │                     #   Glue, Budgets (never applied)
@@ -271,7 +281,7 @@ ramsatelec-intelligence/
 │   │   ├── glue.tf
 │   │   └── budgets.tf
 │   └── *.tf                  # Azure (ECCU524, never provisioned)
-├── dashboard/                # Streamlit analytics (6 pages)
+├── dashboard/                # Streamlit analytics (legacy, 6 pages)
 ├── n8n/workflows/            # WhatsApp/SMS automation
 ├── docker-compose.yml        # Local dev environment
 └── .github/workflows/
@@ -334,4 +344,4 @@ The AWS infrastructure is designed for a portfolio project's budget, not an ente
 
 ---
 
-*Last updated: September 2026*
+*Last updated: September 2026 — 38-route frontend, 7 Recharts analytics dashboards, gallery page*
