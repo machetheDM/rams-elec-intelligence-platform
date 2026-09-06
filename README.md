@@ -1,10 +1,10 @@
-# Rams @Elec Intelligence Platform Showcase
+# Rams @Elec Intelligence Platform
 
-### Built a full AI operations platform for a real South African electrical and refrigeration company — automated inquiry triage, XGBoost cost estimation with SHAP explainability, a 3-agent CrewAI crew, RAG chatbot, and AWS-native ML infrastructure. External client engagement.
+### Built a full AI operations platform for a real South African electrical and refrigeration company — 38-route Next.js frontend, automated inquiry triage, XGBoost cost estimation with SHAP explainability, a 3-agent CrewAI crew, RAG chatbot, 7 Recharts analytics dashboards, and AWS-native ML infrastructure. External client engagement.
 
 **Client:** [ramsatelec.com](https://ramsatelec.com) — Electrical & Refrigeration Engineering, Gauteng + Limpopo, South Africa
 
-> This showcase carries the architecture, patterns and engineering decisions from the production system. The production repository is **private** — it contains infrastructure configuration, deployment specifics, and will handle customer data. This mirror exists for portfolio purposes only.
+> This repository carries the architecture, patterns and engineering decisions from the production system. The production/deployment repository is separate and will be made **private** at deployment — it contains infrastructure configuration, deployment specifics, and will handle customer data. This showcase exists for portfolio purposes.
 
 ---
 
@@ -14,11 +14,11 @@
 
 ---
 
-## Why this repository is a mirror
+## Why this repository exists
 
-The production platform is **private**, deliberately. It holds Terraform infrastructure configuration, SSM parameter paths, API key validation patterns, and will eventually process customer data — publishing it would expose the business's attack surface and is incompatible with South Africa's **POPIA**.
+The production/deployment platform ([rams-elec-intelligence-platform-deployment](https://github.com/machetheDM/rams-elec-intelligence-platform-deployment)) will be made **private** at deployment. It holds Terraform infrastructure configuration, SSM parameter paths, API key validation patterns, and will eventually process customer data — publishing it would expose the business's attack surface and is incompatible with South Africa's **POPIA**.
 
-This showcase carries the architecture, code patterns and engineering decisions with none of the operational configuration. Its companion projects [EduPortal Showcase](https://github.com/machetheDM/edu-portal-showcase) and [EduAnalytics Showcase](https://github.com/machetheDM/edu-analytics-showcase) are mirrored for the same reason.
+This repository carries the architecture, code patterns and engineering decisions with none of the operational configuration. Its companion projects [EduPortal Showcase](https://github.com/machetheDM/edu-portal-showcase) and [EduAnalytics Showcase](https://github.com/machetheDM/edu-analytics-showcase) exist for the same reason.
 
 ---
 
@@ -295,7 +295,7 @@ This project's differentiator is that **every claim is verifiable**:
 
 ## License
 
-This showcase is provided for portfolio and educational purposes. The production system and its data remain private.
+This repository is provided for portfolio and educational purposes. The production/deployment system and its data are in a separate repository that will be made private at deployment.
 
 ---
 
